@@ -30,7 +30,7 @@ pub(crate) fn pairing<E: PairingEngine>(
     E::final_exponentiation(&pairing_miller_affine::<E>(left, right)?).ok_or(Error::InvalidPairing)
 }
 
-pub(crate) fn bit_multiexp<G: AffineCurve>(bits: &[bool], points: &[G]) -> Result<G,Error> {
+pub fn bit_multiexp<G: AffineCurve>(bits: &[bool], points: &[G]) -> Result<G,Error> {
     if bits.len() != points.len() {
         return Err(Error::InvalidIPVectorLength);
     }

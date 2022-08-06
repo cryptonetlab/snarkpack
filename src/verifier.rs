@@ -75,7 +75,7 @@ pub fn verify_aggregate_proof<
                 &mut_rng,
                 checkclone,
             );
-            dbg!("TIPP took {} ms", now.elapsed().as_millis(),);
+            dbg!("MIPP took {} ms", now.elapsed().as_millis(),);
         });
     });
     let res = valid_rcv.recv().unwrap();
@@ -214,7 +214,7 @@ fn gipa_verify_mipp<E: PairingEngine, T: Transcript + Send>(
         // the verifier recomputes the final b value manually - which is O(N) but
         // this is only field operations so this can be done quite fast.
         // TODO make it in a separate thread after the challenge generation instead of blocking the rest
-        compress_field(&mut bits_f, split, &c);
+        compress_field(&mut bits_f, split, &c_inv);
         challenges.push(c);
         challenges_inv.push(c_inv);
     }

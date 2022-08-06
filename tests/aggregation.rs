@@ -26,7 +26,9 @@ fn bls_aggregation() {
     let aggregate_proof = snarkpack::aggregate_keys(
         &prover_srs, 
         &mut prover_transcript, 
-    bitset.clone(), keys).expect("error in aggregation");
+    bitset.clone(), keys.clone()).expect("error in aggregation");
+
+    assert_eq!(aggregate_proof.agg_c, snarkpack::ip::bit_multiexp(&bitset,&keys).unwrap());
 
     let mut ver_transcript = snarkpack::transcript::new_merlin_transcript(b"test aggregation");
     snarkpack::verify_aggregate_proof(

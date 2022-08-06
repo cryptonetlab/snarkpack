@@ -3,7 +3,7 @@ mod macros;
 
 mod commitment;
 mod errors;
-mod ip;
+pub mod ip;
 mod pairing_check;
 mod proof;
 mod prover;
@@ -41,10 +41,11 @@ pub(crate) fn compress<C: AffineCurve>(vec: &mut Vec<C>, split: usize, scaler: &
 pub(crate) fn compress_field<F: PrimeField>(vec: &mut Vec<F>, split: usize, scaler: &F) {
     let (left, right) = vec.split_at_mut(split);
     left.par_iter_mut()
-        .zip(right.par_iter())
+        .zip(right.par_iter_mut())
         .for_each(|(a_l, a_r)| {
             // TODO remove copy
-            *a_l = *a_l + *a_r * scaler;
+            a_r.mul_assign(scaler);
+            a_l.add_assign(a_r.clone());
         });
     let len = left.len();
     vec.resize(len, F::zero());

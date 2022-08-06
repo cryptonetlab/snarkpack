@@ -184,7 +184,7 @@ fn gipa_mipp<E: PairingEngine>(
        // Set up values for next step of recursion
        // c[:n'] + c[n':]^x
        compress(&mut m_c, split, &c);
-       compress_field(&mut m_r, split,&c);
+       compress_field(&mut m_r, split,&c_inv);
 
        // v_left + v_right^x^-1
        vkey = vk_left.compress(&vk_right, &c_inv)?;
