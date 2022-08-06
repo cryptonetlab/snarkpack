@@ -67,6 +67,8 @@ fn bls_aggregation(nkeys: usize, absent: usize) {
     )
     .expect("error in aggregation"));
 
+    let mut buff = Vec::new();
+    aggregate_proof.write(&mut buff).unwrap();
     let mut ver_transcript = snarkpack::transcript::new_merlin_transcript(b"test aggregation");
     let (_,tverify) = timer!(snarkpack::verify_aggregate_proof(
         &ver_srs,
@@ -80,6 +82,7 @@ fn bls_aggregation(nkeys: usize, absent: usize) {
     println!("\n\n------------- BENCHMARK --------------\n");
     println!("- Number of keys aggregating: {} ",nkeys);
     println!("- Number of absent keys (bit false): {} ",absent);
+    println!("- Size of proof: {} bytes",buff.len());
     println!("- Time generating commitment: {} ms",tcomm);
     println!("- Time generating aggregate key: {} ms",taggc);
     println!("- Time generating IPP proof: {} ms", tprover);
