@@ -6,7 +6,6 @@ use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, SerializationError
 use ark_std::{
     fmt::Debug,
     io::{Read, Write},
-    ops::MulAssign,
     vec::Vec,
 };
 use rayon::prelude::*;
