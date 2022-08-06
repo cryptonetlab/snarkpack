@@ -1,7 +1,7 @@
 #[macro_use]
 mod macros;
 
-mod commitment;
+pub mod commitment;
 mod errors;
 pub mod ip;
 mod pairing_check;

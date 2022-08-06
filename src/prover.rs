@@ -34,6 +34,10 @@ pub fn aggregate_keys<E: PairingEngine + std::fmt::Debug, T: Transcript>(
     transcript: &mut T,
     bits: Vec<bool>,
     keys: Vec<E::G1Affine>,
+    // (T,U) = Com(v, C)
+    com_c: commitment::Output<E::Fqk>,
+    // Z = SUM C_i ^ b_i
+    agg_c: E::G1Affine,
 ) -> Result<AggregateProof<E>, Error> {
     if bits.len() != keys.len() {
         return Err(Error::InvalidProof(
@@ -50,13 +54,7 @@ pub fn aggregate_keys<E: PairingEngine + std::fmt::Debug, T: Transcript>(
         return Err(Error::InvalidSRS("SRS len != proofs len".to_string()));
     }
     
-    // (T,U) = Com(v, C)
-    // TODO: make this an argument since this wont change often and can be precomputed
-    let com_c = commitment::single_g1::<E>(&srs.vkey, &keys)?;
 
-    // Z = SUM C_i ^ b_i
-    // TODO in parallel and as input
-    let agg_c = ip::bit_multiexp(&bits, &keys)?;
     let proof = prove_mipp(
         &srs,
         transcript,
