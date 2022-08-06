@@ -159,32 +159,6 @@ pub fn single_g1<E: PairingEngine>(
     Ok(Output(a, b))
 }
 
-/// Commits to a tuple of G1 vector and G2 vector in the following way:
-/// $T = \prod_{i=0}^n e(A_i, v_{1,i})e(B_i,w_{1,i})$
-/// $U = \prod_{i=0}^n e(A_i, v_{2,i})e(B_i,w_{2,i})$
-/// Output is $(T,U)$
-pub fn pair<E: PairingEngine>(
-    vkey: &VKey<E>,
-    wkey: &WKey<E>,
-    a: &[E::G1Affine],
-    b: &[E::G2Affine],
-) -> Result<Output<E::Fqk>, Error> {
-    try_par! {
-        // (A * v)
-        let t1 = ip::pairing::<E>(a, &vkey.a),
-        // (w * B)
-        let t2 = ip::pairing::<E>(&wkey.a, b),
-        let u1 = ip::pairing::<E>(a, &vkey.b),
-        let u2 = ip::pairing::<E>(&wkey.b, b)
-    };
-    let mut t1 = t1;
-    let mut u1 = u1;
-    // (A * v)(w * B)
-    t1.mul_assign(&t2);
-    u1.mul_assign(&u2);
-    Ok(Output(t1, u1))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -216,33 +190,4 @@ mod tests {
         assert!(c1 != c3);
     }
 
-    #[test]
-    fn test_commit_pair() {
-        let n = 6;
-        let mut rng = rand_chacha::ChaChaRng::seed_from_u64(0u64);
-        let h = G2Projective::prime_subgroup_generator();
-        let g = G1Projective::prime_subgroup_generator();
-        let u = Fr::rand(&mut rng);
-        let v = Fr::rand(&mut rng);
-        let v1 = structured_generators_scalar_power(n, &h, &u);
-        let v2 = structured_generators_scalar_power(n, &h, &v);
-        let w1 = structured_generators_scalar_power(2 * n, &g, &u);
-        let w2 = structured_generators_scalar_power(2 * n, &g, &v);
-
-        let vkey = VKey::<Bls12> { a: v1, b: v2 };
-        let wkey = WKey::<Bls12> {
-            a: w1[n..].to_vec(),
-            b: w2[n..].to_vec(),
-        };
-        let a = (0..n)
-            .map(|_| G1Projective::rand(&mut rng).into_affine())
-            .collect::<Vec<_>>();
-        let b = (0..n)
-            .map(|_| G2Projective::rand(&mut rng).into_affine())
-            .collect::<Vec<_>>();
-        let c1 = pair::<Bls12>(&vkey, &wkey, &a, &b).unwrap();
-        let c2 = pair::<Bls12>(&vkey, &wkey, &a, &b).unwrap();
-        assert_eq!(c1, c2);
-        pair::<Bls12>(&vkey, &wkey, &a[1..2], &b).expect_err("this should have failed");
-    }
 }

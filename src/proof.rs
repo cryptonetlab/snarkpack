@@ -13,23 +13,16 @@ use super::{
 /// party in possession of valid Groth16 proofs.
 #[derive(CanonicalSerialize, CanonicalDeserialize, Debug, Clone)]
 pub struct AggregateProof<E: PairingEngine> {
-    /// commitment to A and B using the pair commitment scheme needed to verify
-    /// TIPP relation.
-    pub com_ab: commitment::Output<E::Fqk>,
     /// commit to C separate since we use it only in MIPP
     pub com_c: commitment::Output<E::Fqk>,
-    /// $A^r * B = Z$ is the left value on the aggregated Groth16 equation
-    pub ip_ab: E::Fqk,
-    /// $C^r$ is used on the right side of the aggregated Groth16 equation
+    /// $C^r$ 
     pub agg_c: E::G1Affine,
     pub tmipp: TippMippProof<E>,
 }
 
 impl<E: PairingEngine> PartialEq for AggregateProof<E> {
     fn eq(&self, other: &Self) -> bool {
-        self.com_ab == other.com_ab
-            && self.com_c == other.com_c
-            && self.ip_ab == other.ip_ab
+            self.com_c == other.com_c
             && self.agg_c == other.agg_c
             && self.tmipp == other.tmipp
     }
@@ -54,9 +47,7 @@ impl<E: PairingEngine> AggregateProof<E> {
         }
         // 3. Check all vectors are of the same length and of the correct length
         let ref_len = (gipa.nproofs as f32).log2().ceil() as usize;
-        let all_same = ref_len == gipa.comms_ab.len()
-            && ref_len == gipa.comms_c.len()
-            && ref_len == gipa.z_ab.len()
+        let all_same = ref_len == gipa.comms_c.len()
             && ref_len == gipa.z_c.len();
         if !all_same {
             return Err(Error::InvalidProof(
@@ -90,31 +81,20 @@ impl<E: PairingEngine> AggregateProof<E> {
 #[derive(Debug, Clone)]
 pub struct GipaProof<E: PairingEngine> {
     pub nproofs: u32,
-    pub comms_ab: Vec<(commitment::Output<E::Fqk>, commitment::Output<E::Fqk>)>,
     pub comms_c: Vec<(commitment::Output<E::Fqk>, commitment::Output<E::Fqk>)>,
-    pub z_ab: Vec<(E::Fqk, E::Fqk)>,
     pub z_c: Vec<(E::G1Affine, E::G1Affine)>,
-    pub final_a: E::G1Affine,
-    pub final_b: E::G2Affine,
     pub final_c: E::G1Affine,
-    /// final commitment keys $v$ and $w$ - there is only one element at the
-    /// end for v1 and v2 hence it's a tuple.
+    /// final commitment keys $v$ 
     pub final_vkey: (E::G2Affine, E::G2Affine),
-    pub final_wkey: (E::G1Affine, E::G1Affine),
 }
 
 impl<E: PairingEngine> PartialEq for GipaProof<E> {
     fn eq(&self, other: &Self) -> bool {
         self.nproofs == other.nproofs
-            && self.comms_ab == other.comms_ab
             && self.comms_c == other.comms_c
-            && self.z_ab == other.z_ab
             && self.z_c == other.z_c
-            && self.final_a == other.final_a
-            && self.final_b == other.final_b
             && self.final_c == other.final_c
             && self.final_vkey == other.final_vkey
-            && self.final_wkey == other.final_wkey
     }
 }
 
@@ -129,43 +109,22 @@ impl<E: PairingEngine> CanonicalSerialize for GipaProof<E> {
         let log_proofs = Self::log_proofs(self.nproofs as usize);
         (self.nproofs as u32).serialized_size()
             + log_proofs
-                * (self.comms_ab[0].0.serialized_size()
-                    + self.comms_ab[0].1.serialized_size()
-                    + self.comms_c[0].0.serialized_size()
+                * ( self.comms_c[0].0.serialized_size()
                     + self.comms_c[0].1.serialized_size()
-                    + self.z_ab[0].0.serialized_size()
-                    + self.z_ab[0].1.serialized_size()
                     + self.z_c[0].0.serialized_size()
                     + self.z_c[0].1.serialized_size()
-                    + self.final_a.serialized_size()
-                    + self.final_b.serialized_size()
                     + self.final_c.serialized_size()
-                    + self.final_vkey.serialized_size()
-                    + self.final_wkey.serialized_size())
+                    + self.final_vkey.serialized_size())
     }
     fn serialize<W: Write>(&self, mut out: W) -> Result<(), SerializationError> {
         // number of proofs
         self.nproofs.serialize(&mut out)?;
 
         let log_proofs = Self::log_proofs(self.nproofs as usize);
-        assert_eq!(self.comms_ab.len(), log_proofs);
-
-        // comms_ab
-        for (x, y) in &self.comms_ab {
-            x.serialize(&mut out)?;
-            y.serialize(&mut out)?;
-        }
 
         assert_eq!(self.comms_c.len(), log_proofs);
         // comms_c
         for (x, y) in &self.comms_c {
-            x.serialize(&mut out)?;
-            y.serialize(&mut out)?;
-        }
-
-        assert_eq!(self.z_ab.len(), log_proofs);
-        // z_ab
-        for (x, y) in &self.z_ab {
             x.serialize(&mut out)?;
             y.serialize(&mut out)?;
         }
@@ -178,13 +137,10 @@ impl<E: PairingEngine> CanonicalSerialize for GipaProof<E> {
         }
 
         // final values of the loop
-        self.final_a.serialize(&mut out)?;
-        self.final_b.serialize(&mut out)?;
         self.final_c.serialize(&mut out)?;
 
         // final commitment keys
         self.final_vkey.serialize(&mut out)?;
-        self.final_wkey.serialize(&mut out)?;
 
         Ok(())
     }
@@ -202,27 +158,11 @@ where
 
         let log_proofs = Self::log_proofs(nproofs as usize);
 
-        let mut comms_ab = Vec::with_capacity(log_proofs);
-        for _ in 0..log_proofs {
-            comms_ab.push((
-                Output::<E::Fqk>::deserialize(&mut source)?,
-                Output::<E::Fqk>::deserialize(&mut source)?,
-            ));
-        }
-
         let mut comms_c = Vec::with_capacity(log_proofs);
         for _ in 0..log_proofs {
             comms_c.push((
                 Output::<E::Fqk>::deserialize(&mut source)?,
                 Output::<E::Fqk>::deserialize(&mut source)?,
-            ));
-        }
-
-        let mut z_ab = Vec::with_capacity(log_proofs);
-        for _ in 0..log_proofs {
-            z_ab.push((
-                E::Fqk::deserialize(&mut source)?,
-                E::Fqk::deserialize(&mut source)?,
             ));
         }
 
@@ -234,30 +174,19 @@ where
             ));
         }
 
-        let final_a = E::G1Affine::deserialize(&mut source)?;
-        let final_b = E::G2Affine::deserialize(&mut source)?;
         let final_c = E::G1Affine::deserialize(&mut source)?;
 
         let final_vkey = (
             E::G2Affine::deserialize(&mut source)?,
             E::G2Affine::deserialize(&mut source)?,
         );
-        let final_wkey = (
-            E::G1Affine::deserialize(&mut source)?,
-            E::G1Affine::deserialize(&mut source)?,
-        );
 
         Ok(GipaProof {
             nproofs,
-            comms_ab,
             comms_c,
-            z_ab,
             z_c,
-            final_a,
-            final_b,
             final_c,
             final_vkey,
-            final_wkey,
         })
     }
 }
@@ -268,14 +197,12 @@ where
 pub struct TippMippProof<E: PairingEngine> {
     pub gipa: GipaProof<E>,
     pub vkey_opening: KZGOpening<E::G2Affine>,
-    pub wkey_opening: KZGOpening<E::G1Affine>,
 }
 
 impl<E: PairingEngine> PartialEq for TippMippProof<E> {
     fn eq(&self, other: &Self) -> bool {
         self.gipa == other.gipa
             && self.vkey_opening == other.vkey_opening
-            && self.wkey_opening == other.wkey_opening
     }
 }
 
@@ -304,16 +231,12 @@ mod tests {
         let a = Bls12::pairing(p, q);
 
         let proof = AggregateProof::<Bls12> {
-            com_ab: O(a, a),
             com_c: O(a, a),
-            ip_ab: a,
             agg_c: G1Affine::prime_subgroup_generator(),
             tmipp: TippMippProof::<Bls12> {
                 gipa: GipaProof {
                     nproofs: 4,
-                    comms_ab: vec![(O(a, a), O(a, a)), (O(a, a), O(a, a))],
                     comms_c: vec![(O(a, a), O(a, a)), (O(a, a), O(a, a))],
-                    z_ab: vec![(a, a), (a, a)],
                     z_c: vec![
                         (
                             G1Affine::prime_subgroup_generator(),
@@ -324,25 +247,15 @@ mod tests {
                             G1Affine::prime_subgroup_generator(),
                         ),
                     ],
-                    final_a: G1Affine::prime_subgroup_generator(),
-                    final_b: G2Affine::prime_subgroup_generator(),
                     final_c: G1Affine::prime_subgroup_generator(),
                     final_vkey: (
                         G2Affine::prime_subgroup_generator(),
                         G2Affine::prime_subgroup_generator(),
                     ),
-                    final_wkey: (
-                        G1Affine::prime_subgroup_generator(),
-                        G1Affine::prime_subgroup_generator(),
-                    ),
                 },
                 vkey_opening: KZGOpening(
                     G2Affine::prime_subgroup_generator(),
                     G2Affine::prime_subgroup_generator(),
-                ),
-                wkey_opening: KZGOpening(
-                    G1Affine::prime_subgroup_generator(),
-                    G1Affine::prime_subgroup_generator(),
                 ),
             },
         };
@@ -371,12 +284,5 @@ mod tests {
         proof.tmipp.gipa.nproofs = 14;
         proof.parsing_check().expect_err("proof should be invalid");
         proof.tmipp.gipa.nproofs = oldn;
-
-        proof
-            .tmipp
-            .gipa
-            .comms_ab
-            .append(&mut vec![(Output(a, a), Output(a, a))]);
-        proof.parsing_check().expect_err("Proof should be invalid");
     }
 }

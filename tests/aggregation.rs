@@ -1,55 +1,38 @@
-use ark_bls12_381::{Bls12_381, Fr};
+use ark_bls12_381::{Bls12_381, G1Projective, G1Affine, Fr};
 use ark_ff::One;
 use ark_groth16::{
     create_random_proof, generate_random_parameters, prepare_verifying_key, verify_proof,
 };
+use ark_ff::UniformRand;
+use ark_ec::ProjectiveCurve;
 use snarkpack;
 use snarkpack::transcript::Transcript;
 
-mod constraints;
-use crate::constraints::Benchmark;
 use rand_core::SeedableRng;
 
 #[test]
-fn groth16_aggregation() {
-    let num_constraints = 1000;
-    let nproofs = 8;
+fn bls_aggregation() {
+    let nkeys = 8;
     let mut rng = rand_chacha::ChaChaRng::seed_from_u64(1u64);
-    let params = {
-        let c = Benchmark::<Fr>::new(num_constraints);
-        generate_random_parameters::<Bls12_381, _, _>(c, &mut rng).unwrap()
-    };
-    // prepare the verification key
-    let pvk = prepare_verifying_key(&params.vk);
-    // prepare the SRS needed for snarkpack - specialize after to the right
-    // number of proofs
-    let srs = snarkpack::srs::setup_fake_srs::<Bls12_381, _>(&mut rng, nproofs);
-    let (prover_srs, ver_srs) = srs.specialize(nproofs);
-    // create all the proofs
-    let proofs = (0..nproofs)
-        .map(|_| {
-            let c = Benchmark::new(num_constraints);
-            create_random_proof(c, &params, &mut rng).expect("proof creation failed")
-        })
+    let srs = snarkpack::srs::setup_fake_srs::<Bls12_381, _>(&mut rng, nkeys);
+    let (prover_srs, ver_srs) = srs.specialize(nkeys);
+    // create all the keys
+    let keys = (0..nkeys)
+        .map(|_|  G1Projective::rand(&mut rng).into_affine())
         .collect::<Vec<_>>();
-    // verify we can at least verify one
-    let inputs: Vec<_> = [Fr::one(); 2].to_vec();
-    let all_inputs = (0..nproofs).map(|_| inputs.clone()).collect::<Vec<_>>();
-    let r = verify_proof(&pvk, &proofs[1], &inputs).unwrap();
-    assert!(r);
+    let bitset = vec![true; nkeys];
 
     let mut prover_transcript = snarkpack::transcript::new_merlin_transcript(b"test aggregation");
-    prover_transcript.append(b"public-inputs", &all_inputs);
-    let aggregate_proof = snarkpack::aggregate_proofs(&prover_srs, &mut prover_transcript, &proofs)
-        .expect("error in aggregation");
+    let aggregate_proof = snarkpack::aggregate_keys(
+        &prover_srs, 
+        &mut prover_transcript, 
+    bitset.clone(), keys).expect("error in aggregation");
 
     let mut ver_transcript = snarkpack::transcript::new_merlin_transcript(b"test aggregation");
-    ver_transcript.append(b"public-inputs", &all_inputs);
     snarkpack::verify_aggregate_proof(
         &ver_srs,
-        &pvk,
-        &all_inputs,
         &aggregate_proof,
+        bitset,
         &mut rng,
         &mut ver_transcript,
     )

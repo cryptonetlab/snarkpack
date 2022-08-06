@@ -1,7 +1,9 @@
 use crate::Error;
-use ark_ec::{msm::VariableBaseMSM, AffineCurve, PairingEngine};
+use std::ops::AddAssign;
+use ark_ec::{msm::VariableBaseMSM, AffineCurve, PairingEngine, ProjectiveCurve};
 use ark_ff::PrimeField;
 use ark_std::{cfg_iter, vec::Vec};
+use ark_std::Zero;
 use rayon::prelude::*;
 
 pub(crate) fn pairing_miller_affine<E: PairingEngine>(
@@ -27,6 +29,40 @@ pub(crate) fn pairing<E: PairingEngine>(
 ) -> Result<E::Fqk, Error> {
     E::final_exponentiation(&pairing_miller_affine::<E>(left, right)?).ok_or(Error::InvalidPairing)
 }
+
+pub(crate) fn bit_multiexp<G: AffineCurve>(bits: &[bool], points: &[G]) -> Result<G,Error> {
+    if bits.len() != points.len() {
+        return Err(Error::InvalidIPVectorLength);
+    }
+    Ok(bits.par_iter().zip(points.par_iter())
+        .filter(|(b,_)| **b)
+        .fold(|| G::Projective::zero(), |mut acc,(_,e)| {
+        acc.add_assign_mixed(e);
+        acc
+    }).reduce(|| G::Projective::zero(), |mut acc, p| { 
+        acc.add_assign(p);
+        acc
+    }).into_affine())
+ 
+}
+
+pub(crate) fn bitsf_multiexp<G: AffineCurve>(bits: &[G::ScalarField], points: &[G]) -> Result<G,Error> {
+    if bits.len() != points.len() {
+        return Err(Error::InvalidIPVectorLength);
+    }
+    Ok(bits.par_iter()
+        .zip(points.par_iter())
+        .filter(|(b,_)| 
+            b.is_zero())
+        .fold(|| G::Projective::zero(), |mut acc,(_,p)| {
+        acc.add_assign_mixed(p);
+        acc
+    }).reduce(|| G::Projective::zero(), |mut acc, p| { 
+        acc.add_assign(p);
+        acc
+    }).into_affine())
+}
+
 
 pub(crate) fn multiexponentiation<G: AffineCurve>(
     left: &[G],

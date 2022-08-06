@@ -31,12 +31,8 @@ pub const MAX_SRS_SIZE: usize = (2 << 19) + 1;
 pub struct GenericSRS<E: PairingEngine> {
     /// $\{g^a^i\}_{i=0}^{N}$ where N is the smallest size of the two Groth16 CRS.
     pub g_alpha_powers: Vec<E::G1Affine>,
-    /// $\{h^a^i\}_{i=0}^{N}$ where N is the smallest size of the two Groth16 CRS.
-    pub h_alpha_powers: Vec<E::G2Affine>,
     /// $\{g^b^i\}_{i=n}^{N}$ where N is the smallest size of the two Groth16 CRS.
     pub g_beta_powers: Vec<E::G1Affine>,
-    /// $\{h^b^i\}_{i=0}^{N}$ where N is the smallest size of the two Groth16 CRS.
-    pub h_beta_powers: Vec<E::G2Affine>,
 }
 
 /// ProverSRS is the specialized SRS version for the prover for a specific number of proofs to
@@ -52,13 +48,8 @@ pub struct ProverSRS<E: PairingEngine> {
     /// is formed from these powers) since the prover will create a shifted
     /// polynomial of degree 2n-1 when doing the KZG opening proof.
     pub g_alpha_powers_table: Vec<E::G1Affine>,
-    /// $\{h^a^i\}_{i=0}^{n-1}$ - here we don't need to go to 2n-1 since v
-    /// commitment key only goes up to n-1 exponent.
-    pub h_alpha_powers_table: Vec<E::G2Affine>,
     /// $\{g^b^i\}_{i=0}^{2n-1}$
     pub g_beta_powers_table: Vec<E::G1Affine>,
-    /// $\{h^b^i\}_{i=0}^{n-1}$
-    pub h_beta_powers_table: Vec<E::G2Affine>,
     /// commitment key using in MIPP and TIPP
     pub vkey: VKey<E>,
     /// commitment key using in TIPP
@@ -75,16 +66,12 @@ pub struct VerifierSRS<E: PairingEngine> {
     pub h: E::G2Projective,
     pub g_alpha: E::G1Projective,
     pub g_beta: E::G1Projective,
-    pub h_alpha: E::G2Projective,
-    pub h_beta: E::G2Projective,
 }
 
 impl<E: PairingEngine> PartialEq for GenericSRS<E> {
     fn eq(&self, other: &Self) -> bool {
         self.g_alpha_powers == other.g_alpha_powers
             && self.g_beta_powers == other.g_beta_powers
-            && self.h_alpha_powers == other.h_alpha_powers
-            && self.h_beta_powers == other.h_beta_powers
     }
 }
 
@@ -94,8 +81,6 @@ impl<E: PairingEngine> PartialEq for VerifierSRS<E> {
             && self.h == other.h
             && self.g_alpha == other.g_alpha
             && self.g_beta == other.g_beta
-            && self.h_alpha == other.h_alpha
-            && self.h_beta == other.h_beta
     }
 }
 
@@ -118,21 +103,15 @@ impl<E: PairingEngine> GenericSRS<E> {
         assert!(num_proofs.is_power_of_two());
         let tn = 2 * num_proofs; // size of the CRS we need
         assert!(self.g_alpha_powers.len() >= tn);
-        assert!(self.h_alpha_powers.len() >= tn);
         assert!(self.g_beta_powers.len() >= tn);
-        assert!(self.h_beta_powers.len() >= tn);
         let n = num_proofs;
         // when doing the KZG opening we need _all_ coefficients from 0
         // to 2n-1 because the polynomial is of degree 2n-1.
         let g_low = 0;
         let g_up = tn;
-        let h_low = 0;
-        let h_up = h_low + n;
         // TODO  precompute window
         let g_alpha_powers_table = self.g_alpha_powers[g_low..g_up].to_vec();
         let g_beta_powers_table = self.g_beta_powers[g_low..g_up].to_vec();
-        let h_alpha_powers_table = self.h_alpha_powers[h_low..h_up].to_vec();
-        let h_beta_powers_table = self.h_beta_powers[h_low..h_up].to_vec();
 
         println!(
             "\nPROVER SRS -- nun_proofs {}, tn {}, alpha_power_table {}\n",
@@ -141,23 +120,14 @@ impl<E: PairingEngine> GenericSRS<E> {
             g_alpha_powers_table.len()
         );
 
-        let v1 = self.h_alpha_powers[h_low..h_up].to_vec();
-        let v2 = self.h_beta_powers[h_low..h_up].to_vec();
+        let v1 = self.g_alpha_powers[g_low..g_up].to_vec();
+        let v2 = self.g_beta_powers[g_low..g_up].to_vec();
         let vkey = VKey::<E> { a: v1, b: v2 };
         assert!(vkey.has_correct_len(n));
-        // however, here we only need the "right" shifted bases for the
-        // commitment scheme.
-        let w1 = self.g_alpha_powers[n..g_up].to_vec();
-        let w2 = self.g_beta_powers[n..g_up].to_vec();
-        let wkey = WKey::<E> { a: w1, b: w2 };
-        assert!(wkey.has_correct_len(n));
         let pk = ProverSRS::<E> {
             g_alpha_powers_table,
             g_beta_powers_table,
-            h_alpha_powers_table,
-            h_beta_powers_table,
             vkey,
-            wkey,
             n,
         };
         let vk = VerifierSRS::<E> {
@@ -166,8 +136,6 @@ impl<E: PairingEngine> GenericSRS<E> {
             h: self.h_alpha_powers[0].into_projective(),
             g_alpha: self.g_alpha_powers[1].into_projective(),
             g_beta: self.g_beta_powers[1].into_projective(),
-            h_alpha: self.h_alpha_powers[1].into_projective(),
-            h_beta: self.h_beta_powers[1].into_projective(),
         };
         (pk, vk)
     }
