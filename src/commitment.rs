@@ -158,6 +158,19 @@ pub fn single_g1<E: PairingEngine>(
     Ok(Output(a, b))
 }
 
+pub fn pairings_product<E: PairingEngine>(gs: &[E::G1Affine], hs: &[E::G2Affine]) -> E::Fqk {
+    let pairings: Vec<_> = gs
+        .into_par_iter()
+        .map(|g| <E as PairingEngine>::G1Prepared::from(*g))
+        .zip(
+            hs.into_par_iter()
+                .map(|h| <E as PairingEngine>::G2Prepared::from(*h)),
+        )
+        .collect();
+
+    E::product_of_pairings(pairings.iter())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -188,5 +201,4 @@ mod tests {
         let c3 = single_g1::<Bls12>(&vkey, &b).unwrap();
         assert!(c1 != c3);
     }
-
 }

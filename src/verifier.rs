@@ -13,7 +13,7 @@ use super::{
     srs::VerifierSRS,
     transcript::Transcript,
 };
-use crate::{Error, compress_field};
+use crate::{compress_field, Error};
 
 use std::default::Default;
 use std::time::Instant;
@@ -100,7 +100,7 @@ fn verify_mipp<E: PairingEngine, R: Rng + Send, T: Transcript + Send>(
     dbg!("verify with srs shift");
     let now = Instant::now();
     // (T,U), Z for MIPP  and all challenges
-    let (final_res,final_b, challenges, challenges_inv) =
+    let (final_res, final_b, challenges, challenges_inv) =
         gipa_verify_mipp(&proof, bits, transcript);
     dbg!(
         "TIPP verify: gipa verify tipp {}ms",
@@ -182,8 +182,10 @@ fn gipa_verify_mipp<E: PairingEngine, T: Transcript + Send>(
     let mut bits_f = bits.par_iter().map(|b| E::Fr::from(*b)).collect::<Vec<_>>();
     let gipa = &proof.tmipp.gipa;
     // COM(C,r) = SUM C^r given by prover
+    // the Ts
     let comms_c = &gipa.comms_c;
     // Z vectors coming from the GIPA proofs
+    // the Us
     let zs_c = &gipa.z_c;
 
     let now = Instant::now();
@@ -196,9 +198,7 @@ fn gipa_verify_mipp<E: PairingEngine, T: Transcript + Send>(
     // We first generate all challenges as this is the only consecutive process
     // that can not be parallelized then we scale the commitments in a
     // parallelized way
-    for (_i, (comm_c, z_c)) in comms_c.iter().zip(zs_c.iter())
-        .enumerate()
-    {
+    for (_i, (comm_c, z_c)) in comms_c.iter().zip(zs_c.iter()).enumerate() {
         let split = bits_f.len() / 2;
 
         let (tuc_l, tuc_r) = comm_c;
@@ -219,8 +219,8 @@ fn gipa_verify_mipp<E: PairingEngine, T: Transcript + Send>(
         challenges_inv.push(c_inv);
     }
 
-    println!("VERIFIER: last challenge {}",challenges.last().unwrap());
-    println!("VERIFIER: last compressed bit {}",bits_f.last().unwrap());
+    println!("VERIFIER: last challenge {}", challenges.last().unwrap());
+    println!("VERIFIER: last compressed bit {}", bits_f.last().unwrap());
     println!("PROVER: last final c {:?}", gipa.final_c);
 
     dbg!(
@@ -228,7 +228,7 @@ fn gipa_verify_mipp<E: PairingEngine, T: Transcript + Send>(
         now.elapsed().as_millis()
     );
 
-    assert!(bits_f.len() == 1,"recursion loop pow2 error");
+    assert!(bits_f.len() == 1, "recursion loop pow2 error");
     let final_b = *bits_f.last().unwrap();
     let now = Instant::now();
     // COM(v,C)
@@ -253,8 +253,9 @@ fn gipa_verify_mipp<E: PairingEngine, T: Transcript + Send>(
         ZC(&'a E::G1Affine, <E::Fr as PrimeField>::BigInt),
     }
 
-    let res = 
-        comms_c.par_iter().zip(zs_c.par_iter())
+    let res = comms_c
+        .par_iter()
+        .zip(zs_c.par_iter())
         .zip(challenges.par_iter().zip(challenges_inv.par_iter()))
         .flat_map(|((comm_c, z_c), (c, c_inv))| {
             // T and U values for right and left for C part
@@ -326,10 +327,8 @@ pub fn verify_kzg_v<E: PairingEngine, R: Rng + Send>(
     checks: Sender<PairingCheck<E>>,
 ) {
     // f_v(z)
-    let vpoly_eval_z = polynomial_evaluation_product_form_from_transcript(
-        challenges,
-        kzg_challenge,
-    );
+    let vpoly_eval_z =
+        polynomial_evaluation_product_form_from_transcript(challenges, kzg_challenge);
     // -g such that when we test a pairing equation we only need to check if
     // it's equal 1 at the end:
     // e(a,b) = e(c,d) <=> e(a,b)e(-c,d) = 1

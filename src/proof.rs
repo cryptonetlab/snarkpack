@@ -15,16 +15,14 @@ use super::{
 pub struct AggregateProof<E: PairingEngine> {
     /// commit to C separate since we use it only in MIPP
     pub com_c: commitment::Output<E::Fqk>,
-    /// $C^r$ 
+    /// $C^r$
     pub agg_c: E::G1Affine,
     pub tmipp: TippMippProof<E>,
 }
 
 impl<E: PairingEngine> PartialEq for AggregateProof<E> {
     fn eq(&self, other: &Self) -> bool {
-            self.com_c == other.com_c
-            && self.agg_c == other.agg_c
-            && self.tmipp == other.tmipp
+        self.com_c == other.com_c && self.agg_c == other.agg_c && self.tmipp == other.tmipp
     }
 }
 
@@ -47,8 +45,7 @@ impl<E: PairingEngine> AggregateProof<E> {
         }
         // 3. Check all vectors are of the same length and of the correct length
         let ref_len = (gipa.nproofs as f32).log2().ceil() as usize;
-        let all_same = ref_len == gipa.comms_c.len()
-            && ref_len == gipa.z_c.len();
+        let all_same = ref_len == gipa.comms_c.len() && ref_len == gipa.z_c.len();
         if !all_same {
             return Err(Error::InvalidProof(
                 "Proof vectors unequal sizes".to_string(),
@@ -84,7 +81,7 @@ pub struct GipaProof<E: PairingEngine> {
     pub comms_c: Vec<(commitment::Output<E::Fqk>, commitment::Output<E::Fqk>)>,
     pub z_c: Vec<(E::G1Affine, E::G1Affine)>,
     pub final_c: E::G1Affine,
-    /// final commitment keys $v$ 
+    /// final commitment keys $v$
     pub final_vkey: (E::G2Affine, E::G2Affine),
 }
 
@@ -109,7 +106,7 @@ impl<E: PairingEngine> CanonicalSerialize for GipaProof<E> {
         let log_proofs = Self::log_proofs(self.nproofs as usize);
         (self.nproofs as u32).serialized_size()
             + log_proofs
-                * ( self.comms_c[0].0.serialized_size()
+                * (self.comms_c[0].0.serialized_size()
                     + self.comms_c[0].1.serialized_size()
                     + self.z_c[0].0.serialized_size()
                     + self.z_c[0].1.serialized_size()
@@ -201,8 +198,7 @@ pub struct TippMippProof<E: PairingEngine> {
 
 impl<E: PairingEngine> PartialEq for TippMippProof<E> {
     fn eq(&self, other: &Self) -> bool {
-        self.gipa == other.gipa
-            && self.vkey_opening == other.vkey_opening
+        self.gipa == other.gipa && self.vkey_opening == other.vkey_opening
     }
 }
 

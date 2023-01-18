@@ -3,13 +3,13 @@ use ark_ff::{Field, One, PrimeField};
 use ark_poly::polynomial::{univariate::DensePolynomial, UVPolynomial};
 use ark_std::{cfg_iter, Zero};
 
-use rayon::prelude::*;
-use std::ops::{Neg};
 use crate::compress_field;
+use rayon::prelude::*;
+use std::ops::Neg;
 
 use super::{
     commitment,
-    commitment::{VKey},
+    commitment::VKey,
     compress,
     errors::Error,
     ip,
@@ -53,15 +53,8 @@ pub fn aggregate_keys<E: PairingEngine + std::fmt::Debug, T: Transcript>(
     if !srs.has_correct_len(keys.len()) {
         return Err(Error::InvalidSRS("SRS len != proofs len".to_string()));
     }
-    
 
-    let proof = prove_mipp(
-        &srs,
-        transcript,
-        bits,
-        keys,
-        &agg_c,
-    )?;
+    let proof = prove_mipp(&srs, transcript, bits, keys, &agg_c)?;
 
     Ok(AggregateProof {
         com_c,
@@ -118,16 +111,24 @@ fn gipa_mipp<E: PairingEngine>(
     vkey: &VKey<E>,
     agg_c: &E::G1Affine,
 ) -> Result<(GipaProof<E>, Vec<E::Fr>, Vec<E::Fr>), Error> {
-    let bits_f = bits.into_par_iter().map(|b| E::Fr::from(b)).collect::<Vec<_>>();
-    let nproofs= keys.len();
+    let bits_f = bits
+        .into_par_iter()
+        .map(|b| E::Fr::from(b))
+        .collect::<Vec<_>>();
+    let nproofs = keys.len();
     // the values of vectors C and bits rescaled at each step of the loop
-    let (mut m_c, mut m_r) = (keys,bits_f);
+    // these are A and y
+    let (mut m_c, mut m_r) = (keys, bits_f);
     // the values of the commitment keys rescaled at each step of the loop
+    // these are the h for me
     let mut vkey = vkey.clone();
 
     // storing the values for including in the proof
+    // these are T_l and T_r
     let mut comms_c = Vec::new();
+    // these are U_l and U_r
     let mut z_c = Vec::new();
+    // these are the x-es
     let mut challenges: Vec<E::Fr> = Vec::new();
     let mut challenges_inv: Vec<E::Fr> = Vec::new();
 
@@ -179,28 +180,28 @@ fn gipa_mipp<E: PairingEngine>(
         // of c_inv
         let c = c_inv.inverse().unwrap();
 
-       // Set up values for next step of recursion
-       // c[:n'] + c[n':]^x
-       compress(&mut m_c, split, &c);
-       compress_field(&mut m_r, split,&c_inv);
+        // Set up values for next step of recursion
+        // c[:n'] + c[n':]^x
+        compress(&mut m_c, split, &c);
+        compress_field(&mut m_r, split, &c_inv);
 
-       // v_left + v_right^x^-1
-       vkey = vk_left.compress(&vk_right, &c_inv)?;
+        // v_left + v_right^x^-1
+        vkey = vk_left.compress(&vk_right, &c_inv)?;
 
-       comms_c.push((tuc_l, tuc_r));
-       z_c.push((zc_l.into_affine(), zc_r.into_affine()));
-       challenges.push(c);
-       challenges_inv.push(c_inv);
+        comms_c.push((tuc_l, tuc_r));
+        z_c.push((zc_l.into_affine(), zc_r.into_affine()));
+        challenges.push(c);
+        challenges_inv.push(c_inv);
     }
 
     assert!(m_c.len() == 1 && m_r.len() == 1);
     assert!(vkey.a.len() == 1 && vkey.b.len() == 1);
 
     let final_c = m_c[0];
-    let final_vkey= vkey.first();
-    println!("PROVER: last challenge {}",challenges.last().unwrap());
-    println!("PROVER: last compressed bit {}",m_r.last().unwrap());
-    println!("PROVER: last final c {:?}",m_c.last().unwrap());
+    let final_vkey = vkey.first();
+    println!("PROVER: last challenge {}", challenges.last().unwrap());
+    println!("PROVER: last compressed bit {}", m_r.last().unwrap());
+    println!("PROVER: last final c {:?}", m_c.last().unwrap());
 
     Ok((
         GipaProof {
@@ -222,15 +223,12 @@ fn prove_commitment_v<G: AffineCurve>(
     kzg_challenge: &G::ScalarField,
 ) -> Result<KZGOpening<G>, Error> {
     // f_v
-    let vkey_poly = DensePolynomial::from_coefficients_vec(
-        polynomial_coefficients_from_transcript(transcript),
-    );
+    let vkey_poly =
+        DensePolynomial::from_coefficients_vec(polynomial_coefficients_from_transcript(transcript));
 
     // f_v(z)
-    let vkey_poly_z = polynomial_evaluation_product_form_from_transcript(
-        &transcript,
-        kzg_challenge,
-    );
+    let vkey_poly_z =
+        polynomial_evaluation_product_form_from_transcript(&transcript, kzg_challenge);
     create_kzg_opening(
         srs_powers_alpha_table,
         srs_powers_beta_table,

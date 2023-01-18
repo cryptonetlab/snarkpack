@@ -4,6 +4,7 @@ mod macros;
 pub mod commitment;
 mod errors;
 pub mod ip;
+pub mod mipp;
 mod pairing_check;
 mod proof;
 mod prover;
@@ -17,7 +18,7 @@ pub use transcript::*;
 pub use verifier::*;
 
 use ark_ec::{AffineCurve, ProjectiveCurve};
-use ark_ff::{PrimeField};
+use ark_ff::PrimeField;
 use rayon::prelude::*;
 
 /// compress is similar to commit::{V,W}KEY::compress: it modifies the `vec`
