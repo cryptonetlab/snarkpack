@@ -1,4 +1,5 @@
 use ark_ff::fields::Field;
+use ark_ff::PrimeField;
 use ark_serialize::CanonicalSerialize;
 use merlin::Transcript as Merlin;
 
@@ -13,7 +14,7 @@ pub fn new_merlin_transcript(label: &'static [u8]) -> impl Transcript {
 pub trait Transcript {
     fn domain_sep(&mut self);
     fn append<S: CanonicalSerialize>(&mut self, label: &'static [u8], point: &S);
-    fn challenge_scalar<F: Field>(&mut self, label: &'static [u8]) -> F;
+    fn challenge_scalar<F: PrimeField>(&mut self, label: &'static [u8]) -> F;
 }
 
 impl Transcript for Merlin {

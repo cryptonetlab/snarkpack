@@ -17,13 +17,13 @@ pub struct MippProof<E: PairingEngine> {
 }
 
 impl<E: PairingEngine> MippProof<E> {
-    fn prove<T: Transcript>(
+    pub fn prove<T: Transcript>(
         transcript: &mut impl Transcript,
         a: Vec<E::G1Affine>,
         y: Vec<E::Fr>,
         h: Vec<E::G2Affine>,
         U: &E::G1Affine,
-        T: <E as PairingEngine>::Fqk,
+        T: &<E as PairingEngine>::Fqk,
     ) -> Result<MippProof<E>, Error> {
         // let nproofs = keys.len();
         // the values of vectors C and bits rescaled at each step of the loop
@@ -105,10 +105,11 @@ impl<E: PairingEngine> MippProof<E> {
             xs_inv.push(c_inv);
         }
 
+        // TODO: do h stuff
+
         assert!(m_a.len() == 1 && m_y.len() == 1 && m_h.len() == 1);
 
         let final_a = m_a[0];
-        // not sure I need this acc
         let final_h = m_h[0];
         println!("PROVER: last challenge {}", xs.last().unwrap());
         println!("PROVER: last compressed bit {}", m_y.last().unwrap());
@@ -122,15 +123,15 @@ impl<E: PairingEngine> MippProof<E> {
         }))
     }
 
-    fn verify<T: Transcript>(
+    pub fn verify<T: Transcript>(
         transcript: &mut impl Transcript,
-        proof: MippProof<E>,
+        proof: &MippProof<E>,
         point: Vec<E::Fr>,
         U: &E::G1Affine,
-        T: <E as PairingEngine>::Fqk,
+        T: &<E as PairingEngine>::Fqk,
     ) -> bool {
-        let comms_u = proof.comms_u;
-        let comms_t = proof.comms_t;
+        let comms_u = proof.comms_u.clone();
+        let comms_t = proof.comms_t.clone();
 
         // let xs = Vec::new();
         // let xs_inv = Vec::new();
