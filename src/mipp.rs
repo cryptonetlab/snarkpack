@@ -136,9 +136,9 @@ impl<E: PairingEngine> MippProof<E> {
 
         let pst_proof_h = MultilinearPC::<E>::open_g1(ck, &poly, &point);
 
-        // println!("PROVER: last challenge {}", xs.last().unwrap());
-        // println!("PROVER: last y {}", m_y.last().unwrap());
-        // println!("PROVER: last final c {:?}", m_a.last().unwrap());
+        println!("PROVER: last challenge {}", xs.last().unwrap());
+        println!("PROVER: last y {}", m_y.last().unwrap());
+        println!("PROVER: last final c {:?}", m_a.last().unwrap());
 
         Ok((MippProof {
             comms_t,
@@ -201,30 +201,34 @@ impl<E: PairingEngine> MippProof<E> {
             let c = c_inv.inverse().unwrap();
             xs.push(c);
             xs_inv.push(c_inv);
-
-            let c_repr = c.into_repr();
-            let c_inv_repr = c_inv.into_repr();
         }
-        let len = point.len()
+        let len = point.len();
 
-        let final_y = (0..len)
+        let final_y: E::Fr = (0..len)
             .into_par_iter()
             .map(|i| E::Fr::one() + xs_inv[i].mul(point[i]) - point[i])
-            .prod();
-        let u_prime = (0..len).into_par_iter().map(|i| {
-            let (comm_u_l, comm_u_r) = comms_u[i]
-            comm_u_l.into_projective().mul(c_inv[i].into_repr()) + comm_u_r.into_projective().mul(c[i].into_repr())
+            .product();
 
-        }).add();
-        let t_prime = (0..len).into_par_iter().map(|i| {
-            let (comm_u_l, comm_u_r) = comms_u[i]
-            comm_u_l.into_projective().pow(c_inv[i].into_repr()) + comm_u_r.into_projective().pow(c[i].into_repr())
+        u_prime += (0..len)
+            .into_iter()
+            .map(|i| {
+                let (comm_u_l, comm_u_r) = comms_u[i];
+                comm_u_l.into_projective().mul(xs_inv[i].into_repr())
+                    + comm_u_r.into_projective().mul(xs[i].into_repr())
+            })
+            .sum::<E::G1Projective>();
 
-        }).prod();
+        t_prime *= (0..len)
+            .into_par_iter()
+            .map(|i| {
+                let (comm_t_l, comm_t_r) = comms_t[i];
+                comm_t_l.pow(xs_inv[i].into_repr()) * comm_t_r.pow(xs[i].into_repr())
+            })
+            .product::<E::Fqk>();
 
-        // println!("VERIFIER: last challenge {}", xs.last().unwrap());
-        // println!("VERIFIER: last y {}", final_y);
-        // println!("VERIFIER: last final c from prover {:?}", proof.final_a);
+        println!("VERIFIER: last challenge {}", xs.last().unwrap());
+        println!("VERIFIER: last y {}", final_y);
+        println!("VERIFIER: last final c from prover {:?}", proof.final_a);
 
         // compute structured polynomial h at a random point
         let mut point: Vec<E::Fr> = Vec::new();
@@ -233,7 +237,10 @@ impl<E: PairingEngine> MippProof<E> {
             let r = transcript.challenge_scalar::<E::Fr>(b"random_point");
             point.push(r);
         }
-        let v = (0..m).into_par_iter().map(|i|E::Fr::one() + point[i].mul(xs_inv[m - i - 1]) - point[i]);
+        let v = (0..m)
+            .into_par_iter()
+            .map(|i| E::Fr::one() + point[i].mul(xs_inv[m - i - 1]) - point[i])
+            .product();
 
         // println!("VERIFIER: v is {}", v);
 
@@ -245,11 +252,12 @@ impl<E: PairingEngine> MippProof<E> {
         assert!(check_h == true);
 
         let final_u = proof.final_a.mul(final_y);
-        let final_t = E::pairing(proof.final_a, proof.final_h);
+        let final_t: <E as PairingEngine>::Fqk = E::pairing(proof.final_a, proof.final_h);
 
-        let check_u = u_prime == final_u;
         let check_t = t_prime == final_t;
-
+        assert!(check_t == true);
+        let check_u = u_prime == final_u;
+        assert!(check_u == true);
         check_h & check_u & check_t
     }
 }
