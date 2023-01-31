@@ -41,6 +41,7 @@ pub(crate) fn compress<C: AffineCurve>(vec: &mut Vec<C>, split: usize, scaler: &
 // TODO make that generic with points as well
 pub(crate) fn compress_field<F: PrimeField>(vec: &mut Vec<F>, split: usize, scaler: &F) {
     let (left, right) = vec.split_at_mut(split);
+    assert!(left.len() == right.len());
     left.par_iter_mut()
         .zip(right.par_iter_mut())
         .for_each(|(a_l, a_r)| {

@@ -5,30 +5,39 @@ use super::commitment;
 use ark_ec::ProjectiveCurve;
 use ark_ec::{AffineCurve, PairingEngine};
 use ark_ff::{Field, PrimeField};
+use ark_poly::{DenseMultilinearExtension, MultilinearExtension};
+use ark_poly_commit::multilinear_pc::data_structures::{
+    Commitment_G2, CommitterKey, Proof, Proof_G1, VerifierKey,
+};
+use ark_poly_commit::multilinear_pc::MultilinearPC;
+use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Read, SerializationError, Write};
 use ark_std::One;
-use std::ops::Mul;
-
-#[derive(Debug, Clone)]
+use ark_std::Zero;
+use rayon::iter::ParallelIterator;
+use rayon::prelude::IntoParallelIterator;
+use std::ops::{Add, Mul, MulAssign, SubAssign};
+#[derive(Debug, Clone, CanonicalDeserialize, CanonicalSerialize)]
 pub struct MippProof<E: PairingEngine> {
     pub comms_t: Vec<(<E as PairingEngine>::Fqk, <E as PairingEngine>::Fqk)>,
     pub comms_u: Vec<(E::G1Affine, E::G1Affine)>,
     pub final_a: E::G1Affine,
     pub final_h: E::G2Affine,
+    pub pst_proof_h: Proof_G1<E>,
 }
 
 impl<E: PairingEngine> MippProof<E> {
     pub fn prove<T: Transcript>(
         transcript: &mut impl Transcript,
+        ck: &CommitterKey<E>,
         a: Vec<E::G1Affine>,
         y: Vec<E::Fr>,
         h: Vec<E::G2Affine>,
         U: &E::G1Affine,
         T: &<E as PairingEngine>::Fqk,
     ) -> Result<MippProof<E>, Error> {
-        // let nproofs = keys.len();
         // the values of vectors C and bits rescaled at each step of the loop
         // these are A and y
-        let (mut m_a, mut m_y) = (a, y);
+        let (mut m_a, mut m_y) = (a.clone(), y.clone());
         // the values of the commitment keys rescaled at each step of the loop
         // these are the h for me
         let mut m_h = h.clone();
@@ -44,7 +53,6 @@ impl<E: PairingEngine> MippProof<E> {
 
         // we already appended t
         transcript.append(b"U", U);
-
         while m_a.len() > 1 {
             // recursive step
             // Recurse with problem of half size
@@ -72,6 +80,7 @@ impl<E: PairingEngine> MippProof<E> {
                 let comm_u_l = ip::multiexponentiation(ra_l, &ry_r),
                 // Z_r = c[:n'] ^ r[n':]
                 let comm_u_r = ip::multiexponentiation(ra_r, &ry_l)
+
             };
             // Compute C commitment over the distinct halfs of C
             // u_l = c[n':] * v[:n']
@@ -105,25 +114,62 @@ impl<E: PairingEngine> MippProof<E> {
             xs_inv.push(c_inv);
         }
 
-        // TODO: do h stuff
-
         assert!(m_a.len() == 1 && m_y.len() == 1 && m_h.len() == 1);
 
         let final_a = m_a[0];
         let final_h = m_h[0];
-        println!("PROVER: last challenge {}", xs.last().unwrap());
-        println!("PROVER: last compressed bit {}", m_y.last().unwrap());
-        println!("PROVER: last final c {:?}", m_a.last().unwrap());
+
+        // println!("before evaluations");
+        // get polynomial
+        let poly = DenseMultilinearExtension::<E::Fr>::from_evaluations_vec(
+            xs_inv.len(),
+            Self::polynomial_evaluations_from_transcript::<E::Fr>(&xs_inv),
+        );
+        let c = MultilinearPC::<E>::commit_g2(ck, &poly);
+        assert!(c.h_product == final_h);
+
+        // create proof that h is indeed correct
+        let mut point: Vec<E::Fr> = (0..poly.num_vars)
+            .into_iter()
+            .map(|_| transcript.challenge_scalar::<E::Fr>(b"random_point"))
+            .collect();
+
+        let pst_proof_h = MultilinearPC::<E>::open_g1(ck, &poly, &point);
+
+        // println!("PROVER: last challenge {}", xs.last().unwrap());
+        // println!("PROVER: last y {}", m_y.last().unwrap());
+        // println!("PROVER: last final c {:?}", m_a.last().unwrap());
 
         Ok((MippProof {
             comms_t,
             comms_u,
             final_a,
-            final_h,
+            final_h: final_h,
+            pst_proof_h,
         }))
     }
 
+    fn polynomial_evaluations_from_transcript<F: Field>(cs_inv: &[F]) -> Vec<F> {
+        let m = cs_inv.len();
+        let pow_m = 2_usize.pow(m as u32);
+
+        let evals = (0..pow_m)
+            .into_par_iter()
+            .map(|i| {
+                let mut res = F::one();
+                for j in 0..m {
+                    if (i >> j) & 1 == 1 {
+                        res *= cs_inv[m - j - 1];
+                    }
+                }
+                res
+            })
+            .collect();
+        evals
+    }
+
     pub fn verify<T: Transcript>(
+        vk: &VerifierKey<E>,
         transcript: &mut impl Transcript,
         proof: &MippProof<E>,
         point: Vec<E::Fr>,
@@ -133,12 +179,14 @@ impl<E: PairingEngine> MippProof<E> {
         let comms_u = proof.comms_u.clone();
         let comms_t = proof.comms_t.clone();
 
-        // let xs = Vec::new();
-        // let xs_inv = Vec::new();
+        let mut xs = Vec::new();
+        let mut xs_inv = Vec::new();
         let mut final_y = E::Fr::one();
         let mut u_prime = U.clone().into_projective();
         let mut t_prime = T.clone();
 
+        transcript.append(b"U", U);
+        assert!(comms_u.len() == point.len());
         for (i, (comm_u, comm_t)) in comms_u.iter().zip(comms_t.iter()).enumerate() {
             let (comm_u_l, comm_u_r) = comm_u;
             let (comm_t_l, comm_t_r) = comm_t;
@@ -151,26 +199,91 @@ impl<E: PairingEngine> MippProof<E> {
             let c_inv = transcript.challenge_scalar::<E::Fr>(b"challenge_i");
 
             let c = c_inv.inverse().unwrap();
+            xs.push(c);
+            xs_inv.push(c_inv);
 
-            final_y *= E::Fr::one() - point[i] + c_inv.mul(point[i]);
             let c_repr = c.into_repr();
             let c_inv_repr = c_inv.into_repr();
-
-            let (comm_u_l_proj, comm_u_r_proj) =
-                (comm_u_l.into_projective(), comm_u_r.into_projective());
-
-            u_prime += comm_u_l_proj.mul(c_inv_repr) + comm_u_r_proj.mul(c_repr);
-            t_prime *= comm_t_l.pow(c_inv_repr) * comm_t_r.pow(c_repr);
         }
+        let len = point.len()
 
-        // TODO: prove that h is correct
+        let final_y = (0..len)
+            .into_par_iter()
+            .map(|i| E::Fr::one() + xs_inv[i].mul(point[i]) - point[i])
+            .prod();
+        let u_prime = (0..len).into_par_iter().map(|i| {
+            let (comm_u_l, comm_u_r) = comms_u[i]
+            comm_u_l.into_projective().mul(c_inv[i].into_repr()) + comm_u_r.into_projective().mul(c[i].into_repr())
+
+        }).add();
+        let t_prime = (0..len).into_par_iter().map(|i| {
+            let (comm_u_l, comm_u_r) = comms_u[i]
+            comm_u_l.into_projective().pow(c_inv[i].into_repr()) + comm_u_r.into_projective().pow(c[i].into_repr())
+
+        }).prod();
+
+        // println!("VERIFIER: last challenge {}", xs.last().unwrap());
+        // println!("VERIFIER: last y {}", final_y);
+        // println!("VERIFIER: last final c from prover {:?}", proof.final_a);
+
+        // compute structured polynomial h at a random point
+        let mut point: Vec<E::Fr> = Vec::new();
+        let m = xs_inv.len();
+        for i in 0..m {
+            let r = transcript.challenge_scalar::<E::Fr>(b"random_point");
+            point.push(r);
+        }
+        let v = (0..m).into_par_iter().map(|i|E::Fr::one() + point[i].mul(xs_inv[m - i - 1]) - point[i]);
+
+        // println!("VERIFIER: v is {}", v);
+
+        let comm_h = Commitment_G2 {
+            nv: m,
+            h_product: proof.final_h,
+        };
+        let check_h = MultilinearPC::<E>::check_2(vk, &comm_h, &point, v, &proof.pst_proof_h);
+        assert!(check_h == true);
 
         let final_u = proof.final_a.mul(final_y);
         let final_t = E::pairing(proof.final_a, proof.final_h);
 
-        let check1 = u_prime == final_u;
-        let check2 = t_prime == final_t;
+        let check_u = u_prime == final_u;
+        let check_t = t_prime == final_t;
 
-        check1 & check2
+        check_h & check_u & check_t
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ark_bls12_381::{Bls12_381, Fr};
+    use ark_ec::PairingEngine;
+    use ark_poly::DenseMultilinearExtension;
+    use ark_poly_commit::multilinear_pc::MultilinearPC;
+    use ark_std::{test_rng, UniformRand};
+    type E = Bls12_381;
+    #[test]
+    fn test_setup() {
+        let mut rng = test_rng();
+        let params = MultilinearPC::<E>::setup(2, &mut rng);
+        // list of evaluation for polynomial
+        // 1 + 2*x_1 + x_2 + x_1x_2
+        let evals_1 = vec![
+            Fr::from(1u64),
+            Fr::from(4u64),
+            Fr::from(2u64),
+            Fr::from(5u64),
+        ];
+        let poly_1 = DenseMultilinearExtension::<Fr>::from_evaluations_vec(2, evals_1);
+
+        // list of evaluation for polynomial
+        // 1 + x_1 + x_2 + 2*x_1x_2
+        let evals_2 = vec![
+            Fr::from(1u64),
+            Fr::from(2u64),
+            Fr::from(2u64),
+            Fr::from(5u64),
+        ];
+        let poly_2 = DenseMultilinearExtension::<Fr>::from_evaluations_vec(2, evals_2);
     }
 }
