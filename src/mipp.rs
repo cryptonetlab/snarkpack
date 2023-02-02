@@ -13,9 +13,11 @@ use ark_poly_commit::multilinear_pc::MultilinearPC;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Read, SerializationError, Write};
 use ark_std::One;
 use ark_std::Zero;
+use rayon::iter::IndexedParallelIterator;
+use rayon::iter::IntoParallelRefIterator;
 use rayon::iter::ParallelIterator;
 use rayon::prelude::IntoParallelIterator;
-use std::ops::{Add, Mul, MulAssign, SubAssign};
+use std::ops::{Add, AddAssign, Mul, MulAssign, SubAssign};
 #[derive(Debug, Clone, CanonicalDeserialize, CanonicalSerialize)]
 pub struct MippProof<E: PairingEngine> {
     pub comms_t: Vec<(<E as PairingEngine>::Fqk, <E as PairingEngine>::Fqk)>,
@@ -136,9 +138,9 @@ impl<E: PairingEngine> MippProof<E> {
 
         let pst_proof_h = MultilinearPC::<E>::open_g1(ck, &poly, &point);
 
-        println!("PROVER: last challenge {}", xs.last().unwrap());
-        println!("PROVER: last y {}", m_y.last().unwrap());
-        println!("PROVER: last final c {:?}", m_a.last().unwrap());
+        // println!("PROVER: last challenge {}", xs.last().unwrap());
+        // println!("PROVER: last y {}", m_y.last().unwrap());
+        // println!("PROVER: last final c {:?}", m_a.last().unwrap());
 
         Ok((MippProof {
             comms_t,
@@ -182,11 +184,13 @@ impl<E: PairingEngine> MippProof<E> {
         let mut xs = Vec::new();
         let mut xs_inv = Vec::new();
         let mut final_y = E::Fr::one();
-        let mut u_prime = U.clone().into_projective();
-        let mut t_prime = T.clone();
+
+        let mut final_res = MippTU {
+            tc: T.clone(),
+            uc: U.into_projective(),
+        };
 
         transcript.append(b"U", U);
-        assert!(comms_u.len() == point.len());
         for (i, (comm_u, comm_t)) in comms_u.iter().zip(comms_t.iter()).enumerate() {
             let (comm_u_l, comm_u_r) = comm_u;
             let (comm_t_l, comm_t_r) = comm_t;
@@ -201,36 +205,56 @@ impl<E: PairingEngine> MippProof<E> {
             let c = c_inv.inverse().unwrap();
             xs.push(c);
             xs_inv.push(c_inv);
+
+            final_y *= E::Fr::one() + c_inv.mul(point[i]) - point[i];
         }
-        let len = point.len();
+        enum Op<'a, E: PairingEngine> {
+            TC(&'a E::Fqk, <E::Fr as PrimeField>::BigInt),
+            UC(&'a E::G1Affine, <E::Fr as PrimeField>::BigInt),
+        }
 
-        let final_y: E::Fr = (0..len)
-            .into_par_iter()
-            .map(|i| E::Fr::one() + xs_inv[i].mul(point[i]) - point[i])
-            .product();
+        let res = comms_t
+            .par_iter()
+            .zip(comms_u.par_iter())
+            .zip(xs.par_iter().zip(xs_inv.par_iter()))
+            .flat_map(|((comm_t, comm_u), (c, c_inv))| {
+                // T and U values for right and left for C part
+                let (comm_t_l, comm_t_r) = comm_t;
+                let (comm_u_l, comm_u_r) = comm_u;
 
-        u_prime += (0..len)
-            .into_iter()
-            .map(|i| {
-                let (comm_u_l, comm_u_r) = comms_u[i];
-                comm_u_l.into_projective().mul(xs_inv[i].into_repr())
-                    + comm_u_r.into_projective().mul(xs[i].into_repr())
+                let c_repr = c.into_repr();
+                let c_inv_repr = c_inv.into_repr();
+
+                // we multiple left side by x and right side by x^-1
+                vec![
+                    Op::TC::<E>(comm_t_l, c_inv_repr),
+                    Op::TC(comm_t_r, c_repr),
+                    Op::UC(comm_u_l, c_inv_repr),
+                    Op::UC(comm_u_r, c_repr),
+                ]
             })
-            .sum::<E::G1Projective>();
-
-        t_prime *= (0..len)
-            .into_par_iter()
-            .map(|i| {
-                let (comm_t_l, comm_t_r) = comms_t[i];
-                comm_t_l.pow(xs_inv[i].into_repr()) * comm_t_r.pow(xs[i].into_repr())
+            .fold(MippTU::<E>::default, |mut res, op: Op<E>| {
+                match op {
+                    Op::TC(tx, c) => {
+                        let tx: E::Fqk = tx.pow(c);
+                        res.tc.mul_assign(&tx);
+                    }
+                    Op::UC(zx, c) => {
+                        // TODO replace by MSM ?
+                        let uxp: E::G1Projective = zx.mul(c);
+                        res.uc.add_assign(&uxp);
+                    }
+                }
+                res
             })
-            .product::<E::Fqk>();
+            .reduce(MippTU::default, |mut acc_res, res| {
+                acc_res.merge(&res);
+                acc_res
+            });
 
-        println!("VERIFIER: last challenge {}", xs.last().unwrap());
-        println!("VERIFIER: last y {}", final_y);
-        println!("VERIFIER: last final c from prover {:?}", proof.final_a);
+        let ref_final_res = &mut final_res;
 
-        // compute structured polynomial h at a random point
+        ref_final_res.merge(&res);
         let mut point: Vec<E::Fr> = Vec::new();
         let m = xs_inv.len();
         for i in 0..m {
@@ -242,23 +266,50 @@ impl<E: PairingEngine> MippProof<E> {
             .map(|i| E::Fr::one() + point[i].mul(xs_inv[m - i - 1]) - point[i])
             .product();
 
-        // println!("VERIFIER: v is {}", v);
-
         let comm_h = Commitment_G2 {
             nv: m,
             h_product: proof.final_h,
         };
         let check_h = MultilinearPC::<E>::check_2(vk, &comm_h, &point, v, &proof.pst_proof_h);
-        assert!(check_h == true);
 
         let final_u = proof.final_a.mul(final_y);
         let final_t: <E as PairingEngine>::Fqk = E::pairing(proof.final_a, proof.final_h);
 
-        let check_t = t_prime == final_t;
-        assert!(check_t == true);
-        let check_u = u_prime == final_u;
-        assert!(check_u == true);
+        let check_t = ref_final_res.tc == final_t;
+
+        let check_u = ref_final_res.uc == final_u;
+
         check_h & check_u & check_t
+    }
+}
+
+/// Keeps track of the variables that have been sent by the prover and must
+/// be multiplied together by the verifier. Both MIPP and TIPP are merged
+/// together.
+struct MippTU<E: PairingEngine> {
+    pub tc: E::Fqk,
+    pub uc: E::G1Projective,
+}
+
+impl<E> Default for MippTU<E>
+where
+    E: PairingEngine,
+{
+    fn default() -> Self {
+        Self {
+            tc: E::Fqk::one(),
+            uc: E::G1Projective::zero(),
+        }
+    }
+}
+
+impl<E> MippTU<E>
+where
+    E: PairingEngine,
+{
+    fn merge(&mut self, other: &Self) {
+        self.tc.mul_assign(&other.tc);
+        self.uc.add_assign(&other.uc);
     }
 }
 
