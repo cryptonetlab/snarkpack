@@ -18,6 +18,7 @@ use rayon::iter::IntoParallelRefIterator;
 use rayon::iter::ParallelIterator;
 use rayon::prelude::IntoParallelIterator;
 use std::ops::{Add, AddAssign, Mul, MulAssign, SubAssign};
+use std::time::Instant;
 #[derive(Debug, Clone, CanonicalDeserialize, CanonicalSerialize)]
 pub struct MippProof<E: PairingEngine> {
     pub comms_t: Vec<(<E as PairingEngine>::Fqk, <E as PairingEngine>::Fqk)>,
@@ -190,6 +191,7 @@ impl<E: PairingEngine> MippProof<E> {
             uc: U.into_projective(),
         };
 
+        let start = Instant::now();
         transcript.append(b"U", U);
         for (i, (comm_u, comm_t)) in comms_u.iter().zip(comms_t.iter()).enumerate() {
             let (comm_u_l, comm_u_r) = comm_u;
@@ -212,7 +214,13 @@ impl<E: PairingEngine> MippProof<E> {
             TC(&'a E::Fqk, <E::Fr as PrimeField>::BigInt),
             UC(&'a E::G1Affine, <E::Fr as PrimeField>::BigInt),
         }
+        let end = start.elapsed().as_millis();
+        println!(
+            "loop for adding commits to transcript and getting challenges: {}",
+            end
+        );
 
+        let start = Instant::now();
         let res = comms_t
             .par_iter()
             .zip(comms_u.par_iter())
@@ -253,24 +261,36 @@ impl<E: PairingEngine> MippProof<E> {
             });
 
         let ref_final_res = &mut final_res;
-
         ref_final_res.merge(&res);
+        let end = start.elapsed().as_millis();
+        println!("parallel arithmetic {} ms", end);
+
+        let start = Instant::now();
         let mut point: Vec<E::Fr> = Vec::new();
         let m = xs_inv.len();
         for i in 0..m {
             let r = transcript.challenge_scalar::<E::Fr>(b"random_point");
             point.push(r);
         }
+        let end = start.elapsed().as_millis();
+        println!("getting point p for pst {} ms", end);
+
+        let start = Instant::now();
         let v = (0..m)
             .into_par_iter()
             .map(|i| E::Fr::one() + point[i].mul(xs_inv[m - i - 1]) - point[i])
             .product();
+        let end = start.elapsed().as_millis();
+        println!("poly evaluation at p {} ms", end);
 
+        let start = Instant::now();
         let comm_h = Commitment_G2 {
             nv: m,
             h_product: proof.final_h,
         };
         let check_h = MultilinearPC::<E>::check_2(vk, &comm_h, &point, v, &proof.pst_proof_h);
+        let end = start.elapsed().as_millis();
+        println!("pst verification of h {} ms", end);
 
         let final_u = proof.final_a.mul(final_y);
         let final_t: <E as PairingEngine>::Fqk = E::pairing(proof.final_a, proof.final_h);
